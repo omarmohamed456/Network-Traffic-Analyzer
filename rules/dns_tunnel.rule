@@ -1,0 +1,6 @@
+RULE dns_tunneling
+  DESCRIPTION "DNS tunneling — unusually long DNS query typical of data exfiltration"
+  PROTOCOL DNS
+  DNS_QUERY_LEN > 50
+  THRESHOLD 5 packets FROM same_src IN 10 seconds
+  ACTION alert HIGH

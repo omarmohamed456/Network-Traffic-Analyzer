@@ -1,0 +1,6 @@
+RULE syn_flood
+  DESCRIPTION "SYN flood DoS attack — massive SYN rate from single source"
+  PROTOCOL TCP
+  FLAGS S
+  THRESHOLD 200 packets FROM same_src IN 1 seconds
+  ACTION alert CRITICAL

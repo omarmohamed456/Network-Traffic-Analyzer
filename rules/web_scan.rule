@@ -1,0 +1,15 @@
+RULE web_scan
+  DESCRIPTION "Web directory scan — rapid HTTP requests typical of nikto or gobuster"
+  PROTOCOL TCP
+  DST_PORT 80
+  FLAGS S
+  THRESHOLD 30 packets FROM same_src IN 5 seconds
+  ACTION alert MEDIUM
+
+RULE https_scan
+  DESCRIPTION "HTTPS scan — rapid connection attempts to port 443"
+  PROTOCOL TCP
+  DST_PORT 443
+  FLAGS S
+  THRESHOLD 30 packets FROM same_src IN 5 seconds
+  ACTION alert MEDIUM

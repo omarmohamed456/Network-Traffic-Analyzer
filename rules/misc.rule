@@ -1,0 +1,19 @@
+RULE icmp_flood
+  DESCRIPTION "ICMP flood — ping flood DoS attack"
+  PROTOCOL ICMP
+  THRESHOLD 50 packets FROM same_src IN 2 seconds
+  ACTION alert HIGH
+
+RULE arp_scan
+  DESCRIPTION "ARP scan — rapid ARP requests mapping the network"
+  PROTOCOL ARP
+  ARP_OP request
+  THRESHOLD 20 packets FROM same_src IN 5 seconds
+  ACTION alert MEDIUM
+
+RULE high_entropy_payload
+  DESCRIPTION "High entropy payload on HTTP — possible encrypted tunnel or exfiltration"
+  PROTOCOL TCP
+  DST_PORT 80
+  PAYLOAD_ENTROPY > 7.0
+  ACTION alert MEDIUM

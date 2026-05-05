@@ -1,0 +1,7 @@
+RULE ssh_brute_force
+  DESCRIPTION "SSH brute force — repeated connection attempts to port 22"
+  PROTOCOL TCP
+  DST_PORT 22
+  FLAGS S
+  THRESHOLD 10 packets FROM same_src IN 60 seconds
+  ACTION alert HIGH

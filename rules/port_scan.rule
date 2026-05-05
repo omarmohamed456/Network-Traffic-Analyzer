@@ -1,0 +1,6 @@
+RULE port_scan
+  DESCRIPTION "Horizontal port scan — SYN packets to many ports from same source"
+  PROTOCOL TCP
+  FLAGS S
+  THRESHOLD 20 packets FROM same_src IN 3 seconds
+  ACTION alert HIGH
