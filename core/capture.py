@@ -1,5 +1,5 @@
 # core/capture.py
-# Main sniffer — ties parser, logger, and rule engine together
+# Main sniffer — ties parser, logger, flow_tracker, and rule engine together
 # Run with: sudo python3 main.py
 # ─────────────────────────────────────────────────────────────
 
@@ -9,26 +9,45 @@ import signal
 import sys
 from scapy.all import sniff
 
-from core.parser      import parse_packet
-from core.logger      import Logger
-from core.rule_engine import RuleEngine
-from config           import INTERFACE, LOG_EVERY_PACKET
+from core.parser              import parse_packet
+from core.logger              import Logger
+from core.flow_tracker        import FlowTracker
+from core.connection_tracker  import ConnectionTracker
+from core.rule_engine         import RuleEngine
+from config                   import INTERFACE, LOG_EVERY_PACKET
 
 
 class Capture:
     def __init__(self):
-        self.logger       = Logger()
-        self.rule_engine  = RuleEngine(
+        self.logger      = Logger()
+
+        # Rule engine — alert_callback increments self.stats["alerts"]
+        self.rule_engine = RuleEngine(
             rules_dir="rules/",
-            alert_callback=self.logger.write_alert
+            alert_callback=self._on_alert
         )
+
+        # ConnectionTracker sits between FlowTracker and _on_flow_complete.
+        # FlowTracker emits completed flows → ConnectionTracker stamps
+        # count/srv_count/serror_rate → _on_flow_complete runs rules + logging.
+        self.conn_tracker = ConnectionTracker(
+            downstream=self._on_flow_complete,
+        )
+
+        # FlowTracker aggregates packets into flows.
+        # It calls conn_tracker.stamp() — NOT _on_flow_complete directly.
+        self.flow_tracker = FlowTracker(
+            emit_callback=self.conn_tracker.stamp,
+        )
+
         self.packet_queue = queue.Queue(maxsize=10000)
         self.running      = True
         self.stats        = {
-            "total":    0,
-            "parsed":   0,
-            "alerts":   0,
-            "dropped":  0,
+            "total":   0,
+            "parsed":  0,
+            "flows":   0,
+            "alerts":  0,
+            "dropped": 0,
         }
 
         # Handle Ctrl+C cleanly
@@ -42,7 +61,7 @@ class Capture:
         print(f"{'─'*55}")
         print(f"  Interface : {INTERFACE}")
         print(f"  Rules     : {len(self.rule_engine.rules)} loaded")
-        print(f"  Log every : {'all packets' if LOG_EVERY_PACKET else 'alerts only'}")
+        print(f"  Log mode  : {'all flows' if LOG_EVERY_PACKET else 'alerts only'}")
         print(f"{'─'*55}\n")
         print("  Press Ctrl+C to stop\n")
 
@@ -69,8 +88,36 @@ class Capture:
         )
 
     def set_label(self, label: str):
-        """Change the label applied to all captured packets."""
+        """Change the label applied to all subsequent captured packets."""
         self.logger.set_label(label)
+
+    # ── Callbacks ─────────────────────────────────────────────
+    def _on_flow_complete(self, flow_record: dict):
+        """
+        Called by FlowTracker when a flow is complete.
+        1. Runs rule engine (may fire alerts and mutate rule_verdict).
+        2. Writes the flow — including its final rule_verdict — to storage.
+        Order matters: evaluate first so verdict is set before logging.
+        """
+        self.stats["flows"] += 1
+        self.rule_engine.evaluate(flow_record)
+
+        # Always write flows that triggered a rule so alerts have context.
+        # When LOG_EVERY_PACKET=False, suppress only benign flows.
+        if LOG_EVERY_PACKET or flow_record.get("rule_verdict") != "BENIGN":
+            self.logger.write_flow(flow_record)
+
+    def _on_alert(self, alert: dict):
+        """
+        Called by RuleEngine when a rule fires.
+        Stamps the verdict onto the flow record in-place (flow_record is
+        still alive in _on_flow_complete's stack frame at this point),
+        increments the alert counter, and persists the alert.
+        The alert carries the flow_id so the two records can be joined.
+        """
+        self.stats["alerts"] += 1
+        # alert dict already has flow_id injected by rule_engine.evaluate()
+        self.logger.write_alert(alert)
 
     # ── Internal methods ──────────────────────────────────────
     def _enqueue(self, pkt):
@@ -83,9 +130,9 @@ class Capture:
 
     def _process_loop(self):
         """
-        Worker thread: takes packets from queue,
-        parses them, logs them, runs rule engine.
-        Separate thread so Scapy capture never blocks.
+        Worker thread: takes raw packets from queue, parses them,
+        feeds them into FlowTracker (which aggregates and emits flows).
+        Never calls logger directly — that is FlowTracker's job.
         """
         while self.running:
             try:
@@ -101,12 +148,8 @@ class Capture:
 
                 self.stats["parsed"] += 1
 
-                # Save to storage
-                if LOG_EVERY_PACKET:
-                    self.logger.write_packet(record)
-
-                # Run rule engine
-                self.rule_engine.evaluate(record)
+                # Hand off to FlowTracker — do NOT write to logger here
+                self.flow_tracker.add(record)
 
             except Exception as e:
                 print(f"[Capture] Processing error: {e}")
@@ -116,15 +159,24 @@ class Capture:
         import time
         while self.running:
             time.sleep(30)
+            ft = self.flow_tracker.stats()
             print(
                 f"[Stats] Captured: {self.stats['total']} | "
                 f"Parsed: {self.stats['parsed']} | "
+                f"Flows emitted: {ft['emitted_flows']} | "
+                f"Active flows: {ft['active_flows']} | "
+                f"Alerts: {self.stats['alerts']} | "
                 f"Dropped: {self.stats['dropped']}"
             )
 
     def _shutdown(self, sig, frame):
         print("\n\n[Capture] Shutting down...")
         self.running = False
+
+        # Flush all open flows before closing
+        self.flow_tracker.flush()
+        self.flow_tracker.stop()
+
         self.logger.close()
         print(f"[Capture] Final stats: {self.stats}")
         sys.exit(0)
