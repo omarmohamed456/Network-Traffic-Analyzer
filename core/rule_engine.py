@@ -15,7 +15,8 @@
 #   SRC_PORT            <int>
 #   SRC_IP_NOT          <ip> | $IDS_IP | $VICTIM_IP | $VICTIM_IP_2 | $VICTIM_IP_3
 #                       | $VICTIM_IP_4 | $ATTACKER_IP
-#                       (exclude a source IP — resolved from config.py at load time)
+#                       Multiple SRC_IP_NOT lines are all respected (OR logic —
+#                       flow is excluded if src_ip matches ANY of the listed IPs)
 #   DST_IP              <ip> | $IDS_IP | $VICTIM_IP | $ATTACKER_IP
 #                       (match a specific destination IP)
 #   DST_IP_NOT          <ip> | $IDS_IP | $VICTIM_IP | $ATTACKER_IP
@@ -123,7 +124,7 @@ class Rule:
                                             # any other string = EXACT match on tcp_flags
         self.dst_port             = None
         self.src_port             = None
-        self.src_ip_not           = None    # exclude this resolved src IP
+        self.src_ip_not           = []     # list of excluded src IPs (resolved)
         self.dst_ip               = None    # match this resolved dst IP
         self.dst_ip_not           = None    # exclude this resolved dst IP
         self.threshold_count      = None
@@ -253,8 +254,8 @@ class RuleEngine:
                     rule.src_port = int(parts[1])
 
                 elif keyword == "SRC_IP_NOT":
-                    # Resolve token → real IP at load time
-                    rule.src_ip_not = _resolve_ip(parts[1])
+                    # Append — multiple SRC_IP_NOT lines are all respected
+                    rule.src_ip_not.append(_resolve_ip(parts[1]))
 
                 elif keyword == "DST_IP":
                     rule.dst_ip = _resolve_ip(parts[1])
@@ -428,7 +429,7 @@ class RuleEngine:
             return False
 
         # IP filters — all resolved from config tokens at load time, no literals here
-        if rule.src_ip_not and flow.get("src_ip") == rule.src_ip_not:
+        if rule.src_ip_not and flow.get("src_ip") in rule.src_ip_not:
             return False
 
         if rule.dst_ip and flow.get("dst_ip") != rule.dst_ip:

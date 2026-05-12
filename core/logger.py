@@ -212,7 +212,7 @@ class Logger:
                     packet_length,
                     land, wrong_fragment, urgent,
                     count, srv_count, serror_rate,
-                    seq_number, ack_number,
+                    tcp_flags, seq_number, ack_number,
                     window_size, tcp_checksum,
                     fin_flag, syn_flag, rst_flag, psh_flag,
                     ack_flag, urg_flag, cwe_flag, ece_flag,
@@ -263,7 +263,7 @@ class Logger:
                     ?,?,?,?,?,?,?,?,?,?,
                     ?,?,?,?,?,?,?,?,?,?,
                     ?,?,?,?,?,?,?,?,?,?,
-                    ?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?
                 )
             """, (
                 record.get("flow_id"),
@@ -286,6 +286,7 @@ class Logger:
                 record.get("count",       0),
                 record.get("srv_count",   0),
                 record.get("serror_rate", 0.0),
+                record.get("tcp_flags"),
                 record.get("seq_number"),
                 record.get("ack_number"),
                 record.get("window_size"),
@@ -436,6 +437,7 @@ class Logger:
                 count                   INTEGER,
                 srv_count               INTEGER,
                 serror_rate             REAL,
+                tcp_flags               TEXT,
                 seq_number              INTEGER,
                 ack_number              INTEGER,
                 window_size             INTEGER,
