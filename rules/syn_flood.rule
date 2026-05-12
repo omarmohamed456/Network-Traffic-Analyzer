@@ -1,6 +1,33 @@
+# syn_flood.rule
+# Covers TCP SYN-based DoS attacks.
+# Thresholds tuned for flow-based counting (not packet counting).
+# ─────────────────────────────────────────────────────────────
+
 RULE syn_flood
-  DESCRIPTION "SYN flood DoS attack — massive SYN rate from single source"
+  DESCRIPTION "SYN flood DoS — high rate of SYN-only flows from single source"
+  # hping3 -S --flood generates hundreds of SYN flows per second.
+  # 100 SYN flows in 10s from one src is well above normal browsing.
   PROTOCOL TCP
   FLAGS S
-  THRESHOLD 200 packets FROM same_src IN 1 seconds
+  THRESHOLD 100 flows FROM same_src IN 10 seconds
   ACTION alert CRITICAL
+
+RULE syn_flood_large
+  DESCRIPTION "SYN flood with large packets — amplified SYN flood or spoofed traffic"
+  # Large SYN packets (> normal 60-byte SYN) suggest padding or crafted packets.
+  PROTOCOL TCP
+  FLAGS S
+  TOTAL_FWD_PACKETS > 500
+  THRESHOLD 50 flows FROM same_src IN 10 seconds
+  ACTION alert CRITICAL
+
+RULE half_open_scan
+  DESCRIPTION "Half-open scan — SYN flows with no ACK response (never completed handshake)"
+  # nmap -sS sends SYN and never completes. Results in flows with syn_flag=1, ack_flag=0,
+  # very short duration, and zero backward bytes (server RST is a different flow).
+  PROTOCOL TCP
+  FLAGS S
+  TOTAL_BWD_BYTES < 1
+  FLOW_DURATION < 500000
+  THRESHOLD 15 flows FROM same_src IN 10 seconds
+  ACTION alert HIGH

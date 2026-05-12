@@ -1,6 +1,80 @@
+# port_scan.rule
+# Covers horizontal and vertical port scanning techniques including
+# stealth scans, slow evasion scans, fragmented packets, and decoy scans.
+#
+# No hardcoded IPs — use $IDS_IP, $VICTIM_IP, $ATTACKER_IP tokens.
+# Tokens are resolved from config.py at load time.
+# ─────────────────────────────────────────────────────────────
+
 RULE port_scan
-  DESCRIPTION "Horizontal port scan — SYN packets to many ports from same source"
+  DESCRIPTION "Horizontal port scan — rapid SYN flows to many ports from same source"
+  # nmap -sS 192.168.10.20 hits 1000 ports. Each is a separate short flow.
+  # 15 distinct SYN flows in 10s from one src is a clear scan pattern.
+  # Excludes IDS VM so idle/zombie scans spoofing $IDS_IP don't self-alert.
   PROTOCOL TCP
   FLAGS S
-  THRESHOLD 20 packets FROM same_src IN 3 seconds
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 15 flows FROM same_src IN 10 seconds
   ACTION alert HIGH
+
+RULE slow_scan
+  DESCRIPTION "Slow port scan — nmap -T1 or -T0 evading rate-based thresholds"
+  # nmap -T1 sends ~1 packet/second — never triggers port_scan (15/10s).
+  # Detected by counting UNIQUE_DST_PORTS from same src over a longer window.
+  # 20 distinct destination ports in 120s = active slow scan regardless of rate.
+  PROTOCOL TCP
+  FLAGS S
+  SRC_IP_NOT $IDS_IP
+  UNIQUE_DST_PORTS > 20
+  WINDOW 120 seconds
+  ACTION alert HIGH
+
+RULE decoy_scan
+  DESCRIPTION "Decoy scan — many distinct source IPs all probing the same destination"
+  # nmap -D RND:10 sends scans from 10 spoofed IPs. No single src hits the
+  # port_scan threshold. Detected by counting UNIQUE_SRC_IPS hitting one dst
+  # in a short window — legitimate hosts never all probe the same machine at once.
+  # No THRESHOLD here — the UNIQUE_SRC_IPS check is the sole gate.
+  # WINDOW provides the time bucket for the unique-IP counter.
+  PROTOCOL TCP
+  FLAGS S
+  DST_IP_NOT $IDS_IP
+  UNIQUE_SRC_IPS > 10
+  WINDOW 30 seconds
+  ACTION alert HIGH
+
+RULE null_scan
+  DESCRIPTION "NULL scan — TCP flow with no flags set, used for stealth OS fingerprinting"
+  # nmap -sN sets zero TCP flags. Closed ports reply RST, open ports are silent.
+  # FLAGS NONE matches only flows where tcp_flags is empty or zero — not all flows.
+  PROTOCOL TCP
+  FLAGS NONE
+  SRC_IP_NOT $IDS_IP
+  ACTION alert HIGH
+
+RULE xmas_scan
+  DESCRIPTION "XMAS scan — TCP FIN+PSH+URG flags set simultaneously, stealth scanning"
+  # nmap -sX. Never seen in legitimate traffic.
+  PROTOCOL TCP
+  FLAGS FPU
+  SRC_IP_NOT $IDS_IP
+  ACTION alert HIGH
+
+RULE fin_scan
+  DESCRIPTION "FIN scan — bare FIN with no ACK, used to probe for open ports"
+  # nmap -sF. Legitimate FIN always comes with ACK in an established connection.
+  PROTOCOL TCP
+  FLAGS F
+  SRC_IP_NOT $IDS_IP
+  TOTAL_BWD_BYTES < 1
+  ACTION alert HIGH
+
+RULE fragmented_scan
+  DESCRIPTION "Fragmented port scan — IP fragmentation used to evade packet inspection"
+  # nmap -f splits packets into small fragments hoping IDS reassembly fails.
+  # wrong_fragment = 1 is set by parser when IP fragment offset is non-zero.
+  PROTOCOL TCP
+  WRONG_FRAGMENT 1
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 5 flows FROM same_src IN 10 seconds
+  ACTION alert MEDIUM

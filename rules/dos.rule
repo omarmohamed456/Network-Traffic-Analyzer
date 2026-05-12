@@ -1,0 +1,54 @@
+# dos.rule
+# Covers volumetric DoS attacks beyond SYN floods —
+# UDP floods, RST floods, and ACK floods.
+# Complements syn_flood.rule.
+# ─────────────────────────────────────────────────────────────
+
+RULE udp_flood
+  DESCRIPTION "UDP flood — high-rate UDP flows to same destination, DoS or amplification setup"
+  # hping3 --udp --flood or nmap UDP scan at high rate.
+  # 100 UDP flows in 10s from one src is far above normal.
+  PROTOCOL UDP
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 100 flows FROM same_src IN 10 seconds
+  ACTION alert HIGH
+
+RULE udp_flood_critical
+  DESCRIPTION "UDP flood — sustained very high rate, active DoS in progress"
+  PROTOCOL UDP
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 300 flows FROM same_src IN 10 seconds
+  ACTION alert CRITICAL
+
+RULE rst_flood
+  DESCRIPTION "RST flood — high rate of TCP RST packets killing established connections"
+  # hping3 -R --flood crafts RST packets to tear down connections.
+  # Legitimate RSTs are rare; 50 in 10s from one src is always malicious.
+  PROTOCOL TCP
+  FLAGS R
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 50 flows FROM same_src IN 10 seconds
+  ACTION alert HIGH
+
+RULE ack_flood
+  DESCRIPTION "ACK flood — bare ACK packets with no response, bypasses SYN-cookie protection"
+  # ACK floods work even when SYN cookies are enabled because the server
+  # must process the ACK to check if it belongs to a connection.
+  # Signature: many ACK-only flows, server sends nothing back.
+  PROTOCOL TCP
+  FLAGS A
+  TOTAL_BWD_BYTES < 1
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 100 flows FROM same_src IN 10 seconds
+  ACTION alert HIGH
+
+RULE small_packet_flood
+  DESCRIPTION "Small packet flood — many tiny packets, probe traffic or packets-per-second DoS"
+  # Crafted tools send minimum-size packets to maximise PPS load on target.
+  # avg_packet_size < 60 means packets are smaller than a bare TCP header.
+  PROTOCOL TCP
+  AVG_PACKET_SIZE < 60
+  TOTAL_FWD_PACKETS > 200
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 10 flows FROM same_src IN 30 seconds
+  ACTION alert MEDIUM

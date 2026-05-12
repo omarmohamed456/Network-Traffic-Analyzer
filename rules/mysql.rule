@@ -1,0 +1,63 @@
+# mysql.rule
+# Covers attacks against MySQL on port 3306.
+# Lab config: remote access enabled, user labuser / password123, database employees.
+# MySQL should NEVER receive connections from outside the lab — any external access
+# to port 3306 is inherently suspicious.
+# ─────────────────────────────────────────────────────────────
+
+RULE mysql_brute_force
+  DESCRIPTION "MySQL brute force — repeated connection attempts to port 3306"
+  # hydra -l labuser -P wordlist mysql://192.168.10.20
+  # Each failed auth is a short TCP flow. 5 flows in 60s from one src.
+  PROTOCOL TCP
+  DST_PORT 3306
+  FLAGS S
+  THRESHOLD 5 flows FROM same_src IN 60 seconds
+  ACTION alert HIGH
+
+RULE mysql_brute_fast
+  DESCRIPTION "MySQL brute force — high-speed automated attack on port 3306"
+  PROTOCOL TCP
+  DST_PORT 3306
+  FLAGS S
+  THRESHOLD 20 flows FROM same_src IN 30 seconds
+  ACTION alert CRITICAL
+
+RULE mysql_any_access
+  DESCRIPTION "MySQL access attempt — any connection to port 3306 from network"
+  # In this lab MySQL should only be accessed locally or from known IPs.
+  # Any completed TCP flow to 3306 warrants attention.
+  # No threshold — every single connection is logged as LOW.
+  # CHANGE: exclude $ATTACKER_IP — mysql_from_external already fires CRITICAL
+  # for attacker connections. This rule is for unexpected internal/unknown sources
+  # only. Without this exclusion both rules fire on the same flow (CRITICAL + LOW).
+  PROTOCOL TCP
+  DST_PORT 3306
+  FLAGS S
+  SRC_IP_NOT $ATTACKER_IP
+  ACTION alert LOW
+
+RULE mysql_short_session
+  DESCRIPTION "MySQL repeated short sessions — failed auth pattern on port 3306"
+  # Failed MySQL auth: connect, server greeting, client auth, error, disconnect.
+  # Duration < 2s and very small backward bytes = authentication failure.
+  PROTOCOL TCP
+  DST_PORT 3306
+  FLOW_DURATION < 2000000
+  TOTAL_BWD_BYTES < 1000
+  THRESHOLD 5 flows FROM same_src IN 120 seconds
+  ACTION alert MEDIUM
+
+# mysql_large_query_response was removed.
+# It overlapped with mysql_success_bulk_read (post_exploit.rule) — both fired
+# on large MySQL backward bytes generating a CRITICAL and HIGH simultaneously.
+# mysql_success_bulk_read is authoritative: CRITICAL, adds FLOW_DURATION > 5s,
+# and has a lower threshold (>1 MB vs >5 MB). No additional detection value.
+
+RULE mysql_scan
+  DESCRIPTION "MySQL port scan — rapid connection attempts probing port 3306"
+  PROTOCOL TCP
+  DST_PORT 3306
+  FLAGS S
+  THRESHOLD 10 flows FROM same_src IN 5 seconds
+  ACTION alert MEDIUM

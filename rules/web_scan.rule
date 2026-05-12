@@ -1,15 +1,64 @@
+# web_scan.rule
+# Covers web service scanning, directory brute force, and application attacks
+# against Apache on ports 80 and 443 (site1, site2, site3 virtual hosts).
+# ─────────────────────────────────────────────────────────────
+
 RULE web_scan
-  DESCRIPTION "Web directory scan — rapid HTTP requests typical of nikto or gobuster"
+  DESCRIPTION "Web directory scan — rapid HTTP flows, typical of nikto or gobuster"
+  # gobuster dir -u http://192.168.10.20 opens a new TCP flow per path attempt.
+  # 20 flows in 10s to port 80 from one src is well above normal browsing.
   PROTOCOL TCP
   DST_PORT 80
   FLAGS S
-  THRESHOLD 30 packets FROM same_src IN 5 seconds
-  ACTION alert MEDIUM
+  THRESHOLD 20 flows FROM same_src IN 10 seconds
+  ACTION alert HIGH
 
 RULE https_scan
   DESCRIPTION "HTTPS scan — rapid connection attempts to port 443"
   PROTOCOL TCP
   DST_PORT 443
   FLAGS S
-  THRESHOLD 30 packets FROM same_src IN 5 seconds
+  THRESHOLD 20 flows FROM same_src IN 10 seconds
+  ACTION alert HIGH
+
+RULE nikto_scan
+  DESCRIPTION "Nikto web scanner detected — characteristic high-entropy User-Agent on HTTP"
+  # Nikto sends many requests with identifiable patterns. High payload entropy on
+  # port 80 (where HTML should be low-entropy plaintext) is a strong indicator.
+  PROTOCOL TCP
+  DST_PORT 80
+  PAYLOAD_ENTROPY > 7.0
+  THRESHOLD 5 flows FROM same_src IN 30 seconds
+  ACTION alert HIGH
+
+RULE slow_loris
+  DESCRIPTION "Slowloris DoS — many long-lived TCP connections to port 80 with near-zero payload"
+  # Slowloris opens many connections and sends partial HTTP headers slowly.
+  # Signature: many flows, long duration, tiny payload per flow.
+  # CHANGE: was PAYLOAD_SIZE < 50. After the entropy accumulation fix,
+  # payload_size is the TOTAL across all packets in the flow — a Slowloris
+  # flow accumulates many small headers and the total easily exceeds 50 bytes.
+  # AVG_PACKET_SIZE < 50 preserves the original per-packet intent: each
+  # individual packet in the flow carries less than 50 bytes of data.
+  PROTOCOL TCP
+  DST_PORT 80
+  AVG_PACKET_SIZE < 50
+  FLOW_DURATION > 10000000
+  THRESHOLD 20 flows FROM same_src IN 60 seconds
+  ACTION alert HIGH
+
+RULE http_large_response
+  DESCRIPTION "Unusually large HTTP response — potential data exfiltration via web"
+  # Normal web pages are kilobytes. Flows where the server sends back > 50 MB
+  # of data suggest bulk file download or exfiltration through the web server.
+  PROTOCOL TCP
+  DST_PORT 80
+  TOTAL_BWD_BYTES > 52428800
+  ACTION alert MEDIUM
+
+RULE https_large_response
+  DESCRIPTION "Unusually large HTTPS response — potential data exfiltration via HTTPS"
+  PROTOCOL TCP
+  DST_PORT 443
+  TOTAL_BWD_BYTES > 52428800
   ACTION alert MEDIUM

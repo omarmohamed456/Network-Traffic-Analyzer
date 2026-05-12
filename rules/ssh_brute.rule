@@ -1,7 +1,35 @@
+# ssh_brute.rule
+# Covers brute force and credential stuffing against OpenSSH on port 22.
+# Victim has root login enabled and weak password — priority target.
+# ─────────────────────────────────────────────────────────────
+
 RULE ssh_brute_force
-  DESCRIPTION "SSH brute force — repeated connection attempts to port 22"
+  DESCRIPTION "SSH brute force — repeated connection attempts to port 22 from same source"
+  # hydra -l root -P wordlist ssh://192.168.10.20 opens a new TCP flow per attempt.
+  # Each failed auth is a short-lived flow. 5 flows in 60s is a conservative threshold
+  # — normal users rarely reconnect this frequently.
   PROTOCOL TCP
   DST_PORT 22
   FLAGS S
-  THRESHOLD 10 packets FROM same_src IN 60 seconds
+  THRESHOLD 5 flows FROM same_src IN 60 seconds
   ACTION alert HIGH
+
+RULE ssh_brute_fast
+  DESCRIPTION "SSH brute force — high-speed attack, likely automated tool"
+  # Aggressive hydra or medusa with high thread count (-t 16+).
+  PROTOCOL TCP
+  DST_PORT 22
+  FLAGS S
+  THRESHOLD 20 flows FROM same_src IN 30 seconds
+  ACTION alert CRITICAL
+
+RULE ssh_short_session
+  DESCRIPTION "SSH repeated short sessions — failed auth attempts leave very short flows"
+  # Failed SSH auth: TCP connects, banner exchanged, auth rejected, disconnect.
+  # Duration < 3s (3,000,000 us) and minimal backward bytes = failed auth pattern.
+  PROTOCOL TCP
+  DST_PORT 22
+  FLOW_DURATION < 3000000
+  TOTAL_BWD_BYTES < 2000
+  THRESHOLD 5 flows FROM same_src IN 120 seconds
+  ACTION alert MEDIUM

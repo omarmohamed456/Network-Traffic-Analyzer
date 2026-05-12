@@ -1,19 +1,75 @@
+# misc.rule
+# Covers ICMP, ARP, IP fragmentation, and general anomaly detection.
+#
+# No hardcoded IPs — use $IDS_IP, $VICTIM_IP, $ATTACKER_IP tokens.
+# Tokens are resolved from config.py at load time.
+# ─────────────────────────────────────────────────────────────
+
 RULE icmp_flood
   DESCRIPTION "ICMP flood — ping flood DoS attack"
+  # hping3 --icmp --flood generates many ICMP flows per second.
+  # 30 ICMP flows in 5s from one src is far above normal.
+  # Excludes IDS VM to prevent false positives from passive monitoring.
   PROTOCOL ICMP
-  THRESHOLD 50 packets FROM same_src IN 2 seconds
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 30 flows FROM same_src IN 5 seconds
   ACTION alert HIGH
 
-RULE arp_scan
-  DESCRIPTION "ARP scan — rapid ARP requests mapping the network"
-  PROTOCOL ARP
-  ARP_OP request
-  THRESHOLD 20 packets FROM same_src IN 5 seconds
+RULE icmp_large_payload
+  DESCRIPTION "ICMP with large payload — ping of death or ICMP covert channel"
+  # Normal ping payload is 56 bytes. > 1000 bytes suggests PoD or data smuggling.
+  PROTOCOL ICMP
+  SRC_IP_NOT $IDS_IP
+  PAYLOAD_SIZE > 1000
   ACTION alert MEDIUM
 
-RULE high_entropy_payload
-  DESCRIPTION "High entropy payload on HTTP — possible encrypted tunnel or exfiltration"
+RULE arp_scan
+  DESCRIPTION "ARP scan — rapid ARP requests mapping the local network"
+  # nmap -PR or arp-scan sends one ARP request per host.
+  # 15 ARP request flows in 5s = active network discovery.
+  # Excludes IDS VM — the sniffer sends legitimate ARP as part of normal
+  # network participation and would otherwise self-trigger this rule.
+  PROTOCOL ARP
+  ARP_OP request
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 15 flows FROM same_src IN 5 seconds
+  ACTION alert MEDIUM
+
+RULE arp_poison
+  DESCRIPTION "ARP poisoning — unsolicited ARP replies to corrupt neighbour caches"
+  # Legitimate ARP replies only follow a request. Unsolicited (gratuitous)
+  # replies at volume are the hallmark of arpspoof / ettercap MITM.
+  # Excludes IDS VM — idle/zombie scans make the victim send SYN-ACK to the
+  # IDS, whose kernel RSTs it, causing ARP traffic that looks like poisoning.
+  PROTOCOL ARP
+  ARP_OP reply
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 5 flows FROM same_src IN 10 seconds
+  ACTION alert HIGH
+
+RULE fragmented_traffic
+  DESCRIPTION "IP fragmented traffic — fragmentation on a LAN may indicate scan evasion"
+  # Non-zero IP fragment offset is unusual on a local LAN (MTU=1500, no need
+  # to fragment). Catches nmap -f and hping3 -f evasion attempts.
+  WRONG_FRAGMENT 1
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 10 flows FROM same_src IN 10 seconds
+  ACTION alert LOW
+
+RULE high_entropy_http
+  DESCRIPTION "High entropy payload on HTTP port 80 — encrypted tunnel or data exfiltration"
+  # Legitimate HTTP traffic is readable HTML/JSON (low entropy).
+  # Entropy > 7.2 on port 80 strongly suggests an encrypted tunnel.
   PROTOCOL TCP
   DST_PORT 80
-  PAYLOAD_ENTROPY > 7.0
+  PAYLOAD_ENTROPY > 7.2
   ACTION alert MEDIUM
+
+# NOTE: high_entropy_nonstandard was merged into exfil.rule's
+# encrypted_nonstandard_port rule. Both previously fired on the same
+# flows (PROTOCOL TCP, PAYLOAD_ENTROPY > 7.5, non-standard port),
+# generating duplicate MEDIUM alerts. encrypted_nonstandard_port
+# (exfil.rule) is the authoritative rule for that pattern — it adds
+# PAYLOAD_SIZE > 100 to reduce noise and has a threshold of 3 flows.
+# high_entropy_http above is kept here because port 80 is a distinct
+# and important case that warrants its own rule.

@@ -1,6 +1,46 @@
+# dns_tunnel.rule
+# Covers DNS-based attacks against BIND9 on port 53.
+# Lab DNS serves victim.lab, kali.lab, ids.lab A records.
+# ─────────────────────────────────────────────────────────────
+
 RULE dns_tunneling
-  DESCRIPTION "DNS tunneling — unusually long DNS query typical of data exfiltration"
+  DESCRIPTION "DNS tunneling — unusually long query names used to exfiltrate data"
+  # Tools like iodine or dnscat2 encode data in subdomains.
+  # Legitimate FQDNs rarely exceed 50 chars; tunneling queries are 100-250 chars.
   PROTOCOL DNS
-  DNS_QUERY_LEN > 50
-  THRESHOLD 5 packets FROM same_src IN 10 seconds
+  DNS_QUERY_LEN > 52
+  THRESHOLD 3 flows FROM same_src IN 10 seconds
   ACTION alert HIGH
+
+RULE dns_tunneling_high_volume
+  DESCRIPTION "DNS tunneling — sustained high volume of long DNS queries (active exfiltration)"
+  PROTOCOL DNS
+  DNS_QUERY_LEN > 52
+  THRESHOLD 20 flows FROM same_src IN 60 seconds
+  ACTION alert CRITICAL
+
+RULE dns_amplification
+  DESCRIPTION "DNS amplification — large DNS responses, potential reflection DoS"
+  # Attacker spoofs victim IP as DNS source → resolver sends large responses to victim.
+  # Large response payload (> 512 bytes, the normal UDP DNS limit) to a single dst.
+  PROTOCOL DNS
+  TOTAL_BWD_BYTES > 512
+  PAYLOAD_SIZE > 512
+  THRESHOLD 10 flows FROM same_src IN 5 seconds
+  ACTION alert HIGH
+
+RULE nxdomain_flood
+  DESCRIPTION "NXDOMAIN flood — rapid queries for non-existent domains, DNS reconnaissance"
+  # nmap --script dns-brute or custom scripts query many subdomains.
+  # High query rate with short responses (NXDOMAIN = tiny payload) from same src.
+  PROTOCOL DNS
+  PAYLOAD_SIZE < 100
+  THRESHOLD 30 flows FROM same_src IN 10 seconds
+  ACTION alert MEDIUM
+
+# dns_any_query was removed.
+# DNS_QUERY_LEN > 0 matched every single DNS query ever made, generating
+# constant MEDIUM alerts during normal operation. The rule was meant to
+# detect qtype=ANY amplification queries, but the parser does not extract
+# dns_qtype. If dns_qtype parsing is added to parser.py in the future,
+# this rule can be re-added as: PROTOCOL DNS / DNS_QTYPE ANY.
