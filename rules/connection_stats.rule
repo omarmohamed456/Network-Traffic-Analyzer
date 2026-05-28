@@ -1,0 +1,58 @@
+# connection_stats.rule
+# Rules that use KDD-style sliding window features:
+#   count       — flows to same dst_ip in last 2 seconds
+#   srv_count   — flows to same dst_port in last 2 seconds
+#   serror_rate — fraction of those flows with SYN errors
+#
+# These fire on patterns invisible to per-flow rules because they
+# require seeing multiple flows in context.
+# ─────────────────────────────────────────────────────────────
+
+RULE rapid_host_connections
+  DESCRIPTION "Rapid connections to same host — host sweep or DoS setup"
+  # Many flows to the same dst_ip in 2 seconds from one src.
+  # Normal clients open a handful of connections; scanners open hundreds.
+  # PROTOCOL TCP prevents ARP flows and UDP broadcasts from incrementing count
+  # and causing false positives during normal lab traffic.
+  PROTOCOL TCP
+  COUNT > 20
+  SRC_IP_NOT $IDS_IP
+  ACTION alert HIGH
+
+RULE rapid_service_connections
+  DESCRIPTION "Rapid connections to same service — service brute force or scan"
+  # Many flows to the same port across potentially different hosts.
+  # hydra -t 16 opens 16 concurrent flows to the same port.
+  # PROTOCOL TCP prevents UDP service traffic from inflating srv_count.
+  PROTOCOL TCP
+  SRV_COUNT > 10
+  SRC_IP_NOT $IDS_IP
+  ACTION alert HIGH
+
+RULE high_serror_rate
+  DESCRIPTION "High SYN error rate — port scan hitting many closed or filtered ports"
+  # serror_rate > 0.7 means 70%+ of recent connections to this dst got no reply.
+  # Legitimate clients almost never hit closed ports at scale.
+  # Combined with count > 5 to avoid triggering on a single failed connect.
+  COUNT > 5
+  SERROR_RATE > 0.7
+  SRC_IP_NOT $IDS_IP
+  ACTION alert HIGH
+
+RULE high_serror_rate_critical
+  DESCRIPTION "Very high SYN error rate with volume — active stealth port scan"
+  # Near-total error rate with significant count = systematic scan.
+  # nmap -sS against a host with a firewall produces serror_rate close to 1.0.
+  COUNT > 15
+  SERROR_RATE > 0.9
+  SRC_IP_NOT $IDS_IP
+  ACTION alert CRITICAL
+
+RULE serror_flood
+  DESCRIPTION "SYN error flood — SYN packets sent but no connections completing"
+  # High srv_count with very high serror_rate to same service =
+  # either a flood targeting that port or a rapid credential spray.
+  SRV_COUNT > 20
+  SERROR_RATE > 0.8
+  SRC_IP_NOT $IDS_IP
+  ACTION alert CRITICAL

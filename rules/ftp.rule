@@ -1,0 +1,52 @@
+# ftp.rule
+# Covers attacks against vsftpd on port 21.
+# Lab config: local user ftpuser / ftp123, write access, chroot confined.
+# ─────────────────────────────────────────────────────────────
+
+RULE ftp_brute_force
+  DESCRIPTION "FTP brute force — repeated connection attempts to port 21"
+  # hydra -l ftpuser -P wordlist ftp://192.168.10.20
+  # Each failed auth attempt is a new TCP flow to port 21.
+  # 5 flows in 60s from one src is the minimum credible brute-force signal.
+  PROTOCOL TCP
+  DST_PORT 21
+  FLAGS S
+  THRESHOLD 5 flows FROM same_src IN 60 seconds
+  ACTION alert HIGH
+
+RULE ftp_brute_fast
+  DESCRIPTION "FTP brute force — aggressive high-speed attack to port 21"
+  PROTOCOL TCP
+  DST_PORT 21
+  FLAGS S
+  THRESHOLD 20 flows FROM same_src IN 30 seconds
+  ACTION alert CRITICAL
+
+RULE ftp_short_session
+  DESCRIPTION "FTP repeated short sessions — failed auth leaves brief flows"
+  # Failed FTP auth: connect, banner, USER sent, PASS sent, 530 Login incorrect, disconnect.
+  # Duration < 5s and small backward bytes = failed credential attempt.
+  PROTOCOL TCP
+  DST_PORT 21
+  FLOW_DURATION < 5000000
+  TOTAL_BWD_BYTES < 500
+  THRESHOLD 5 flows FROM same_src IN 120 seconds
+  ACTION alert MEDIUM
+
+RULE ftp_data_exfil
+  DESCRIPTION "FTP large data transfer — potential file exfiltration via FTP"
+  # FTP data channel uses port 20 (active) or ephemeral ports (passive).
+  # Large outbound transfer on port 21 control channel is unusual —
+  # large inbound (bwd) bytes on FTP suggest bulk data being retrieved by attacker.
+  PROTOCOL TCP
+  DST_PORT 21
+  TOTAL_BWD_BYTES > 10485760
+  ACTION alert MEDIUM
+
+RULE ftp_scan
+  DESCRIPTION "FTP service scan — rapid connection attempts probing port 21"
+  PROTOCOL TCP
+  DST_PORT 21
+  FLAGS S
+  THRESHOLD 10 flows FROM same_src IN 5 seconds
+  ACTION alert MEDIUM

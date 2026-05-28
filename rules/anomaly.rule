@@ -1,0 +1,49 @@
+# anomaly.rule
+# Covers TCP/IP protocol anomalies that indicate crafted or malicious packets.
+# These are things that should never appear in legitimate traffic.
+# ─────────────────────────────────────────────────────────────
+
+RULE land_attack
+  DESCRIPTION "Land attack — source IP and port equal destination IP and port"
+  # Causes some TCP stacks to reply to themselves in an infinite loop.
+  # Completely impossible in legitimate traffic — always crafted.
+  LAND 1
+  SRC_IP_NOT $IDS_IP
+  ACTION alert HIGH
+
+RULE high_syn_no_ack
+  DESCRIPTION "Multiple SYNs with no ACK in a single flow — half-open flood or scan variant"
+  # A legitimate connection has exactly one SYN. Multiple SYNs with zero ACKs
+  # in one flow = retransmission storm or crafted scan tool behaviour.
+  PROTOCOL TCP
+  SYN_FLAG_COUNT > 5
+  ACK_FLAG_COUNT < 1
+  ACTION alert HIGH
+
+RULE low_ttl
+  DESCRIPTION "Packets with TTL under 5 — crafted packets, OS fingerprinting or spoofed source"
+  # Normal LAN traffic never arrives with TTL < 5.
+  # hping3 --ttl 1 is used for traceroute-style mapping and OS fingerprinting.
+  TTL < 5
+  SRC_IP_NOT $IDS_IP
+  ACTION alert MEDIUM
+
+RULE zero_window
+  DESCRIPTION "TCP window size of 0 — RST injection attempt or connection stall attack"
+  # A zero-window advertisement from the client on connection initiation
+  # is always crafted — a real client would never advertise zero receive buffer.
+  PROTOCOL TCP
+  INIT_WIN_FWD = 0
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 5 flows FROM same_src IN 30 seconds
+  ACTION alert LOW
+
+RULE arp_mac_mismatch
+  DESCRIPTION "ARP sender MAC differs from Ethernet source MAC — ARP spoofing in progress"
+  # In a legitimate ARP reply, the Ethernet frame source MAC always matches
+  # the hardware address claimed in the ARP payload.
+  # A mismatch is the definitive signature of arpspoof or ettercap MITM.
+  PROTOCOL ARP
+  ARP_MAC_MISMATCH true
+  SRC_IP_NOT $IDS_IP
+  ACTION alert CRITICAL

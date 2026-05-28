@@ -1,0 +1,67 @@
+# exfil.rule
+# Covers data exfiltration, C2 beaconing, and covert channel detection.
+# Uses flow-level statistical features (IAT std dev, byte volumes, duration).
+# ─────────────────────────────────────────────────────────────
+
+RULE beaconing
+  DESCRIPTION "C2 beaconing — highly regular inter-arrival times suggest automated heartbeat"
+  # Malware C2 channels beacon at fixed intervals (e.g. every 30s exactly).
+  # Legitimate user traffic is irregular. Very low IAT standard deviation
+  # across multiple flows from the same src = automated/scripted.
+  # Requires at least a few flows to build meaningful IAT statistics.
+  #
+  # CHANGE: was FLOW_IAT_STD < 5.0 (5ms). That threshold is physically
+  # impossible for human-scale beaconing — C2 implants beacon every few
+  # seconds to minutes, where sub-5ms IAT regularity cannot exist. The
+  # previous value would never fire in practice. Raised to 500.0ms, which
+  # catches tools that beacon on fixed short intervals (every 1-2 seconds)
+  # while still being far below what random user-driven traffic produces.
+  PROTOCOL TCP
+  FLOW_IAT_STD < 500.0
+  FLOW_DURATION > 5000000
+  THRESHOLD 5 flows FROM same_src IN 300 seconds
+  ACTION alert HIGH
+
+RULE large_outbound_transfer
+  DESCRIPTION "Large outbound data transfer — possible bulk exfiltration"
+  # A single flow where the server sends > 100 MB of data outbound.
+  # Covers mysqldump, tar+pipe, wget of large files from victim.
+  TOTAL_BWD_BYTES > 104857600
+  ACTION alert HIGH
+
+RULE sustained_outbound
+  DESCRIPTION "Sustained outbound data flow — repeated large transfers to same destination"
+  # Multiple flows each sending significant data to the same destination.
+  # Each flow > 10 MB, threshold of 5 in 300s = 50+ MB leaving the network.
+  TOTAL_BWD_BYTES > 10485760
+  THRESHOLD 5 flows FROM same_src IN 300 seconds
+  ACTION alert HIGH
+
+RULE encrypted_nonstandard_port
+  DESCRIPTION "Encrypted traffic on non-standard port — possible C2 or exfil channel"
+  # High entropy (> 7.5) on a port that isn't 443 or 22 (where encryption is expected)
+  # suggests a covert channel. Covers custom C2 using RC4/AES over raw TCP.
+  PROTOCOL TCP
+  PAYLOAD_ENTROPY > 7.5
+  PAYLOAD_SIZE > 100
+  THRESHOLD 3 flows FROM same_src IN 60 seconds
+  ACTION alert MEDIUM
+
+RULE long_lived_connection
+  DESCRIPTION "Unusually long-lived TCP connection — persistent shell or tunnel"
+  # A TCP flow lasting > 10 minutes (600,000,000 microseconds) with ongoing
+  # data exchange suggests an interactive session (reverse shell, SSH tunnel,
+  # or persistent C2 implant).
+  PROTOCOL TCP
+  FLOW_DURATION > 600000000
+  TOTAL_BWD_BYTES > 1000
+  ACTION alert MEDIUM
+
+RULE icmp_covert_channel
+  DESCRIPTION "ICMP covert channel — high entropy or large payload in ICMP flow"
+  # Tools like ptunnel encode TCP traffic inside ICMP echo packets.
+  # High entropy ICMP payload is a strong indicator of data smuggling.
+  PROTOCOL ICMP
+  PAYLOAD_ENTROPY > 6.5
+  PAYLOAD_SIZE > 100
+  ACTION alert HIGH

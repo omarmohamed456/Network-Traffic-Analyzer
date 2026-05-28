@@ -1,0 +1,85 @@
+# recon.rule
+# Covers reconnaissance patterns not covered by port_scan.rule —
+# ICMP host discovery, HTTP scanner fingerprinting, DNS enumeration,
+# and reverse shell listener detection.
+# ─────────────────────────────────────────────────────────────
+
+RULE icmp_sweep
+  DESCRIPTION "ICMP sweep — ping sweep discovering live hosts on the network"
+  # nmap -sn or fping sends one ICMP echo per host.
+  # 20 ICMP flows from one src in 5s = active host discovery.
+  # Your arp_scan rule covers Layer 2 discovery; this covers Layer 3.
+  PROTOCOL ICMP
+  SRC_IP_NOT $IDS_IP
+  THRESHOLD 20 flows FROM same_src IN 5 seconds
+  ACTION alert MEDIUM
+
+RULE dns_nxdomain_recon
+  DESCRIPTION "DNS NXDOMAIN recon — rapid queries for non-existent domains, subdomain enumeration"
+  # dnsenum, sublist3r, and ffuf query hundreds of subdomains probing for
+  # valid hosts. Each miss produces a small NXDOMAIN response.
+  # 15 tiny DNS responses in 20s from one src = enumeration in progress.
+  PROTOCOL DNS
+  PAYLOAD_SIZE < 80
+  TOTAL_BWD_BYTES < 100
+  THRESHOLD 15 flows FROM same_src IN 20 seconds
+  ACTION alert MEDIUM
+
+RULE http_no_user_agent
+  DESCRIPTION "HTTP request with no User-Agent header — scanner or raw exploit tool"
+  # Every browser and legitimate HTTP client sends a User-Agent.
+  # Tools like curl (without -A), Python requests without headers,
+  # and exploit frameworks often omit it entirely.
+  PROTOCOL TCP
+  DST_PORT 80
+  HTTP_USER_AGENT null
+  THRESHOLD 3 flows FROM same_src IN 30 seconds
+  ACTION alert MEDIUM
+
+RULE mysql_from_external
+  DESCRIPTION "MySQL connection from non-victim host — external access attempt on port 3306"
+  # MySQL in this lab is local-only. Any connection from a host that is not
+  # the victim itself is inherently external and suspicious.
+  # SRC_IP_NOT $VICTIM_IP excludes the victim's own loopback/self-connections.
+  # SRC_IP_NOT $IDS_IP excludes the IDS machine — monitoring agents or health
+  # checks running on the IDS box would otherwise fire CRITICAL on themselves.
+  PROTOCOL TCP
+  DST_PORT 3306
+  SRC_IP_NOT $VICTIM_IP
+  SRC_IP_NOT $IDS_IP
+  ACTION alert CRITICAL
+
+RULE reverse_shell_5555
+  DESCRIPTION "Connection to port 5555 — common reverse shell listener port"
+  PROTOCOL TCP
+  DST_PORT 5555
+  SRC_IP_NOT $IDS_IP
+  ACTION alert CRITICAL
+
+RULE reverse_shell_1234
+  DESCRIPTION "Connection to port 1234 — common reverse shell listener port"
+  PROTOCOL TCP
+  DST_PORT 1234
+  SRC_IP_NOT $IDS_IP
+  ACTION alert CRITICAL
+
+RULE reverse_shell_9001
+  DESCRIPTION "Connection to port 9001 — common Metasploit and reverse shell listener port"
+  PROTOCOL TCP
+  DST_PORT 9001
+  SRC_IP_NOT $IDS_IP
+  ACTION alert CRITICAL
+
+RULE reverse_shell_6666
+  DESCRIPTION "Connection to port 6666 — common reverse shell listener port"
+  PROTOCOL TCP
+  DST_PORT 6666
+  SRC_IP_NOT $IDS_IP
+  ACTION alert CRITICAL
+
+RULE reverse_shell_8888
+  DESCRIPTION "Connection to port 8888 — common reverse shell and C2 port"
+  PROTOCOL TCP
+  DST_PORT 8888
+  SRC_IP_NOT $IDS_IP
+  ACTION alert HIGH

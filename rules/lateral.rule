@@ -1,0 +1,57 @@
+# lateral.rule
+# Covers lateral movement, unexpected service access, and
+# protocols that should never appear in this lab environment.
+# ─────────────────────────────────────────────────────────────
+
+RULE telnet_access
+  DESCRIPTION "Telnet connection — cleartext protocol, should never appear in this network"
+  # No service in this lab runs telnet. Any flow to port 23 indicates
+  # either a misconfiguration, a rogue service, or an attacker probing.
+  PROTOCOL TCP
+  DST_PORT 23
+  ACTION alert MEDIUM
+
+RULE rdp_brute_force
+  DESCRIPTION "RDP brute force — repeated connection attempts to port 3389"
+  # No Windows machines in this lab, so any RDP traffic is anomalous.
+  # Could indicate a rogue VM or lateral movement attempt.
+  PROTOCOL TCP
+  DST_PORT 3389
+  FLAGS S
+  THRESHOLD 5 flows FROM same_src IN 60 seconds
+  ACTION alert HIGH
+
+RULE smb_scan
+  DESCRIPTION "SMB scan — connections to port 445, lateral movement or ransomware indicator"
+  # No SMB service in this lab. Port 445 scanning is a classic WannaCry /
+  # EternalBlue pattern and indicates active lateral movement attempts.
+  PROTOCOL TCP
+  DST_PORT 445
+  FLAGS S
+  THRESHOLD 3 flows FROM same_src IN 10 seconds
+  ACTION alert HIGH
+
+RULE netbios_scan
+  DESCRIPTION "NetBIOS scan — connections to ports 137/138/139, Windows network reconnaissance"
+  # NetBIOS has no place in this Linux-only lab.
+  PROTOCOL TCP
+  DST_PORT 139
+  FLAGS S
+  THRESHOLD 5 flows FROM same_src IN 10 seconds
+  ACTION alert LOW
+
+RULE vnc_access
+  DESCRIPTION "VNC access attempt — remote desktop on port 5900"
+  # No VNC service in this lab. Any flow to 5900 is anomalous.
+  PROTOCOL TCP
+  DST_PORT 5900
+  ACTION alert MEDIUM
+
+RULE suspicious_high_port
+  DESCRIPTION "Suspicious high-port connection — possible reverse shell or C2 listener"
+  # Reverse shells commonly bind to ports > 4000 (4444, 5555, 6666, etc.).
+  # A completed flow with data exchange on a non-standard high port is suspicious.
+  # Combine with high entropy rule for stronger signal.
+  PROTOCOL TCP
+  DST_PORT 4444
+  ACTION alert HIGH
