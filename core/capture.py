@@ -87,9 +87,6 @@ class Capture:
             stop_filter=lambda _: not self.running
         )
 
-    def set_label(self, label: str):
-        """Change the label applied to all subsequent captured packets."""
-        self.logger.set_label(label)
 
     # ── Callbacks ─────────────────────────────────────────────
     def _on_flow_complete(self, flow_record: dict):
@@ -141,7 +138,7 @@ class Capture:
                 continue
 
             try:
-                record = parse_packet(raw_pkt, self.logger.current_label)
+                record = parse_packet(raw_pkt)
 
                 if record is None:
                     continue

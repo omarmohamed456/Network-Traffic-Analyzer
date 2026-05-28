@@ -2,7 +2,7 @@
 # Writes every completed flow record to three formats simultaneously:
 #   JSON   → Splunk / SIEM ingestion (newline-delimited)
 #   CSV    → ML training dataset
-#   SQLite → dashboard queries
+#   SQLite → dashboard queries /removed
 # ─────────────────────────────────────────────────────────────
 
 import json
@@ -11,8 +11,7 @@ import sqlite3
 import os
 import threading
 from datetime import datetime, timezone
-from config import DB_PATH, JSON_LOG_PATH, CSV_LOG_PATH
-
+from config import DB_PATH, JSON_LOG_PATH, CSV_LOG_PATH, SAVE_SQLITE
 
 # ── CSV column order ──────────────────────────────────────────
 # Must exactly match the keys emitted by flow_tracker.to_record()
@@ -107,15 +106,17 @@ CSV_FIELDS = [
 
 class Logger:
     def __init__(self):
-        self.current_label = "normal"
         self._lock         = threading.Lock()
 
         # Ensure storage directory exists
         os.makedirs("storage", exist_ok=True)
 
         # Set up SQLite
-        self.db = sqlite3.connect(DB_PATH, check_same_thread=False)
-        self._init_db()
+        if SAVE_SQLITE:
+            self.db = sqlite3.connect(DB_PATH, check_same_thread=False)
+            self._init_db()
+        else:
+            self.db = None
 
         # Set up CSV — write header only for new files
         csv_is_new = not os.path.exists(CSV_LOG_PATH)
@@ -137,37 +138,31 @@ class Logger:
         print(f"         SQLite → {DB_PATH}")
 
     # ── Label management ──────────────────────────────────────
-    def set_label(self, label: str):
-        """
-        Call before each attack phase in training sessions.
-        e.g.  logger.set_label("port_scan")
-        Only affects packets captured AFTER this call;
-        flows already open keep the label they were opened with.
-        """
-        self.current_label = label
-        ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        print(f"[Logger] [{ts}] Label → {label.upper()}")
+    # def set_label(self, label: str):
+    #     """
+    #     Call before each attack phase in training sessions.
+    #     e.g.  logger.set_label("port_scan")
+    #     Only affects packets captured AFTER this call;
+    #     flows already open keep the label they were opened with.
+    #     """
+    #     self.current_label = label
+    #     ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    #     print(f"[Logger] [{ts}] Label → {label.upper()}")
 
     # ── Main write method ─────────────────────────────────────
+
     def write_flow(self, record: dict):
         """
         Write one completed flow record to all three stores.
-
-        The label is taken from the record itself (set at packet-capture
-        time by FlowTracker) rather than overwriting with current_label.
-        This ensures flows that started before a label change keep their
-        original label — critical for training data integrity.
-
-        If the record has no label (shouldn't happen), falls back to
-        current_label as a safety net.
         """
-        if not record.get("label"):
-            record["label"] = self.current_label
+        # Live labelling disabled – label will be filled later by post‑processing.
+        record["label"] = None
 
         with self._lock:
             self._write_json(record)
             self._write_csv(record)
-            self._write_sqlite_flow(record)
+            if SAVE_SQLITE:
+                self._write_sqlite_flow(record)
 
     # Keep old name as alias so any external callers don't break
     def write_packet(self, record: dict):
@@ -176,7 +171,8 @@ class Logger:
     def write_alert(self, alert: dict):
         """Write a rule engine alert to the SQLite alerts table."""
         with self._lock:
-            self._write_sqlite_alert(alert)
+            if SAVE_SQLITE:
+                self._write_sqlite_alert(alert)
 
     # ── Internal writers ──────────────────────────────────────
     def _write_json(self, record: dict):
@@ -557,4 +553,5 @@ class Logger:
     def close(self):
         self._csv_file.close()
         self._json_file.close()
-        self.db.close()
+        if SAVE_SQLITE and self.db:
+            self.db.close()

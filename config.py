@@ -1,5 +1,4 @@
-# config.py — edit these before running
-# ─────────────────────────────────────────────────────────────
+SAVE_SQLITE = False   # Set to True to re‑enable
 
 # ── Network interface ─────────────────────────────────────────
 INTERFACE      = "enp0s3"       # run 'ip a' on IDS VM to find yours
@@ -11,8 +10,8 @@ INTERFACE      = "enp0s3"       # run 'ip a' on IDS VM to find yours
 IDS_IP         = "192.168.10.30"   # this machine — excluded from false-positive rules
 VICTIM_IP      = "192.168.10.20"   # primary victim (Apache, SSH, FTP, DNS, MySQL)
 VICTIM_IP_2    = "192.168.10.21"   # victim clone 2
-VICTIM_IP_3    = "192.168.10.22"   # victim clone 3
-VICTIM_IP_4    = "192.168.10.23"   # victim clone 4
+VICTIM_IP_3    = "192.168.10.23"   # victim clone 3
+VICTIM_IP_4    = "192.168.10.25"   # victim clone 4
 ATTACKER_IP    = "192.168.10.10"   # Kali attacker
 
 # ── Network scope ─────────────────────────────────────────────

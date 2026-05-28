@@ -49,7 +49,7 @@ def payload_entropy(data: bytes) -> float:
     return round(entropy, 4)
 
 
-def parse_packet(pkt, label: str = "normal") -> dict | None:
+def parse_packet(pkt) -> dict | None:
     """
     Parse a raw Scapy packet into a flat structured dict.
     Returns None if the packet has no IP layer and is not ARP.
@@ -60,8 +60,6 @@ def parse_packet(pkt, label: str = "normal") -> dict | None:
     record = {
         # ── Meta ──────────────────────────────────────────────
         "timestamp":         datetime.now(timezone.utc).isoformat(),
-        "label":             label,
-
         # ── Layer 2 — Ethernet ────────────────────────────────
         "src_mac":           None,
         "dst_mac":           None,

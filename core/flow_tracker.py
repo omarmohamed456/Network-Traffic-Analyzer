@@ -17,7 +17,7 @@
 import threading
 import time
 import math
-import uuid
+import ulid
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -112,7 +112,8 @@ class _Flow:
 
     def __init__(self, key: tuple, first_packet: dict, ts: float):
         self.key         = key
-        self.label       = first_packet.get("label", "normal")
+        # self.label       = first_packet.get("label", "normal")
+        self.label = None
         self.protocol    = first_packet.get("protocol")
         self.start_ts    = ts
         self.last_ts     = ts
@@ -124,8 +125,7 @@ class _Flow:
         self.fin_ts   = None
 
         # Unique ID for this flow — links flow record to alert record
-        self.flow_id = str(uuid.uuid4())
-
+        self.flow_id = str(ulid.new())
         # Carry layer-2/3 fields from the first packet
         self._first = first_packet
 

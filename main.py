@@ -4,7 +4,6 @@
 #
 # Optional args:
 #   --interface eth0        override interface from config.py
-#   --label port_scan       start with a specific label
 #   --no-log                don't log every packet (alerts only)
 # ─────────────────────────────────────────────────────────────
 
@@ -39,16 +38,11 @@ def main():
 
     parser = argparse.ArgumentParser(description="Network IDS")
     parser.add_argument("--interface", help="Network interface to capture on")
-    parser.add_argument("--label",     help="Initial label for packets",
-                        default="normal")
     parser.add_argument("--no-log",    action="store_true",
                         help="Only log alerts, skip per-flow logging")
     args = parser.parse_args()
 
     # ── 2. Apply CLI overrides to config module BEFORE any other import ──
-    # capture.py / logger.py use  `from config import X`  which binds the
-    # name at import time.  We must mutate config BEFORE those modules are
-    # imported, otherwise the overrides are silently ignored.
     import config
     if args.interface:
         config.INTERFACE = args.interface
@@ -62,7 +56,6 @@ def main():
     from core.capture import Capture
 
     capture = Capture()
-    capture.set_label(args.label)
     capture.start()
 
 
